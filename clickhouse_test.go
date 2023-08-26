@@ -6,6 +6,7 @@ import (
 	"github.com/aluka-7/clickhouse"
 	"github.com/aluka-7/configuration"
 	"github.com/aluka-7/configuration/backends"
+	"github.com/google/uuid"
 	. "github.com/smartystreets/goconvey/convey"
 	"testing"
 	"time"
@@ -24,7 +25,8 @@ func initConfig(t *testing.T) {
 func TestClickHouse(t *testing.T) {
 	initConfig(t)
 	Convey("test ClickHouse", t, func() {
-		conn := clickhouse.Engine(conf, "1000").Conn("")
+		eng := clickhouse.Engine(conf, "1000")
+		conn := eng.Conn("")
 		ctx := context.Background()
 		Convey("Test Ping", func() {
 			err := conn.Ping(ctx)
@@ -34,37 +36,53 @@ func TestClickHouse(t *testing.T) {
 			err := conn.Exec(ctx, "DROP TABLE IF EXISTS example")
 			So(err, ShouldBeNil)
 
-			err = conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS hc_user_bind (
-				user_id UInt64, 
-				parent_uid UInt64, 
-				created_time DateTime
-			) ENGINE = MergeTree() PARTITION BY parent_uid PRIMARY KEY user_id`)
+			err = conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS example (
+				Col1 UInt8, 
+				Col2 String, 
+				Col3 FixedString(3), 
+			    Col4 UUID, 
+			    Col5 Map(String, UInt8),
+				Col6 Array(String),
+				Col7 Tuple(String, UInt8, Array(Map(String, String))),
+				Col8 DateTime
+			) Engine = Memory`)
 			So(err, ShouldBeNil)
 
-			batch, err := conn.PrepareBatch(ctx, "INSERT INTO hc_user_bind")
+			batch, err := conn.PrepareBatch(ctx, "INSERT INTO example")
 			So(err, ShouldBeNil)
-			for i := 0; i < 5; i++ {
+			for i := 0; i < 100; i++ {
 				err = batch.Append(
-					uint64(i),
-					uint64(i+10),
+					uint8(42),
+					"ClickHouse",
+					"Inc",
+					uuid.New(),
+					map[string]uint8{"key": 1},             // Map(String, UInt8)
+					[]string{"Q", "W", "E", "R", "T", "Y"}, // Array(String)
+					[]interface{}{ // Tuple(String, UInt8, Array(Map(String, String)))
+						"String Value", uint8(5), []map[string]string{
+							{"key": "value"},
+							{"key": "value"},
+							{"key": "value"},
+						},
+					},
 					time.Now(),
 				)
 				So(err, ShouldBeNil)
 			}
 			So(batch.Send(), ShouldBeNil)
 
-			rows, err := conn.Query(ctx, "SELECT user_id, parent_uid, created_time FROM hc_user_bind WHERE user_id = 1")
+			rows, err := conn.Query(ctx, "SELECT Col1, Col2, Col3 FROM example WHERE Col1 = 2")
 			So(err, ShouldBeNil)
 			for rows.Next() {
 				var (
-					userId      uint64
-					parentUid   uint64
-					createdTime time.Time
+					col1 uint8
+					col2 string
+					col3 string
 				)
-				err = rows.Scan(&userId, &parentUid, &createdTime)
+				err = rows.Scan(&col1, &col2, &col3)
 				So(err, ShouldBeNil)
 
-				fmt.Printf("row: user_id=%d, parent_uid=%d, created_time=%s\n", userId, parentUid, createdTime)
+				fmt.Printf("row: col1=%d, col2=%s, col3=%s\n", col1, col2, col3)
 			}
 		})
 	})
